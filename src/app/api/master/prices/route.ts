@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
     const prices = await executeQuery<any[]>(query, values);
     return NextResponse.json(prices);
   } catch (error) {
+    console.error('Error fetching prices:', error);
     return NextResponse.json({ message: 'Error fetching prices' }, { status: 500 });
   }
 }
@@ -50,6 +51,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ message: 'Price added successfully' }, { status: 201 });
   } catch (error) {
+    console.error('Error adding price:', error);
     return NextResponse.json({ message: 'Error adding price' }, { status: 500 });
   }
 }
