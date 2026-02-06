@@ -26,11 +26,14 @@ FRONTEND_URL = "http://localhost:3000"
 
 print("Sedang memuat model PaddleOCR...")
 
-# Gunakan parameter minimalis yang pasti didukung
+# Gunakan parameter yang lebih stabil untuk nota
 ocr = PaddleOCR(
     lang='id',
-    use_angle_cls=True,
-    enable_mkldnn=False # Matikan MKLDNN secara eksplisit di level OCR
+    use_angle_cls=False,    # Matikan jika menyebabkan spasi/karakter terpisah berlebihan
+    enable_mkldnn=False,
+    det_db_thresh=0.3,      # Threshold deteksi lebih rendah untuk menangkap teks tipis
+    det_db_box_thresh=0.5,
+    show_log=False
 )
 
 print("✅ PaddleOCR Berhasil Dimuat!")
@@ -75,6 +78,7 @@ def handle_process(sid, data):
             return
 
         img = Image.open(BytesIO(img_bytes)).convert('RGB')
+        print(f"Image Size: {img.size}")
         
         # Simpan ke file sementara (PaddleOCR lebih stabil baca dari file di Windows)
         temp_img_path = "temp_receipt.png"
@@ -85,15 +89,21 @@ def handle_process(sid, data):
         sio.emit('status', {'msg': 'Sedang membaca teks nota (OCR)...'}, to=sid)
         eventlet.sleep(0)
         
-        # Gunakan pemanggilan paling simpel untuk menghindari error argument di versi tertentu
+        # Gunakan pemanggilan paling simpel
         result = ocr.ocr(temp_img_path)
         
         if not result or not result[0]:
-            print("OCR Result empty")
+            print("OCR Result empty or failed")
             sio.emit('error', {'msg': 'Gagal membaca teks dari gambar'}, to=sid)
             return
 
-        raw_text = "\n".join([line[1][0] for res in result for line in res])
+        # PaddleOCR result: [ [[box], [text, score]], ... ]
+        raw_text = ""
+        for line in result[0]:
+            text = line[1][0]
+            raw_text += text + " "
+        
+        raw_text = raw_text.strip()
         print(f"Detected Text:\n{raw_text}")
 
         # 3. Finish (Send back raw text so it shows in frontend)
