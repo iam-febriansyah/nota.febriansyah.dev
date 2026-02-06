@@ -20,8 +20,9 @@ import {
   CommandList
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Check, ChevronsUpDown, Trash2, Plus } from 'lucide-react';
+import { Check, ChevronsUpDown, Trash2, Plus, Upload, Loader2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { io, Socket } from 'socket.io-client';
 
 export default function TransactionNewPage() {
   const router = useRouter();
@@ -39,6 +40,12 @@ export default function TransactionNewPage() {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [qty, setQty] = useState(1);
 
+  // OCR & Socket States
+  const [uploading, setUploading] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState<string>("");
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [ocrResult, setOcrResult] = useState<string>("");
+
   useEffect(() => {
     // Fetch dealers and items
     const fetchData = async () => {
@@ -55,6 +62,114 @@ export default function TransactionNewPage() {
     };
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (items.length === 0) return;
+
+    // Initialize Socket
+    const socketInstance = io('http://localhost:5000');
+    setSocket(socketInstance);
+
+    socketInstance.on('status', (data) => {
+      console.log(data);
+      setOcrStatus(data.msg);
+    });
+
+    socketInstance.on('finish', (data) => {
+      console.log("OCR Finish Data:", data);
+      setOcrStatus("OCR Berhasil!");
+      
+      if (data.raw_text) {
+        setOcrResult(data.raw_text);
+      }
+
+      if (data.data && data.data.items) {
+        // Attempt to auto-fill items
+        const newCartItems: any[] = [];
+        data.data.items.forEach((ocrItem: any) => {
+          // Find matching item in master list (case-insensitive search)
+          const matchedItem = items.find(
+            (m) => m.name.toLowerCase().includes(ocrItem.name.toLowerCase()) || 
+                   ocrItem.name.toLowerCase().includes(m.name.toLowerCase())
+          );
+
+          if (matchedItem) {
+            newCartItems.push({
+              barang_id: matchedItem.id,
+              barang_name: matchedItem.name,
+              barang_code: matchedItem.code,
+              qty: ocrItem.qty || 1,
+              unit_price: ocrItem.price || 0,
+              subtotal: (ocrItem.qty || 1) * (ocrItem.price || 0)
+            });
+          }
+        });
+
+        if (newCartItems.length > 0) {
+          setCart(prev => [...prev, ...newCartItems]);
+          setOcrStatus(`Berhasil mengekstrak ${newCartItems.length} barang!`);
+        } else {
+          setOcrStatus("OCR selesai, tetapi tidak ada barang yang cocok dengan data master.");
+        }
+      }
+      
+      setUploading(false);
+    });
+
+    socketInstance.on('error', (data) => {
+      setOcrStatus(`Error: ${data.msg}`);
+      setUploading(false);
+    });
+
+    return () => {
+      socketInstance.disconnect();
+    };
+  }, [items]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setOcrStatus("Uploading file...");
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error("Upload failed");
+      
+      const data = await res.json();
+      setOcrStatus("File uploaded, starting OCR...");
+      console.log(data);
+      
+      if (socket) {
+        // Read as base64 to send directly to Python OCR
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const base64String = event.target?.result as string;
+          console.log("process_receipt with base64!");
+          socket.emit('process_receipt', { 
+            url: data.url, 
+            image: base64String 
+          });
+        };
+        reader.onerror = () => {
+          setOcrStatus("Error reading file for OCR");
+          setUploading(false);
+        };
+        reader.readAsDataURL(file);
+      }
+    } catch (err: any) {
+      setOcrStatus(`Upload Error: ${err.message}`);
+      setUploading(false);
+    }
+  };
 
   const addToCart = () => {
     if (!selectedItem) return;
@@ -128,10 +243,54 @@ export default function TransactionNewPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card className="md:col-span-2">
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle>Detail Barang</CardTitle>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="file"
+                  id="receipt-upload"
+                  className="hidden"
+                  accept="image/*,application/pdf"
+                  onChange={handleFileUpload}
+                  disabled={uploading}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={uploading}
+                  onClick={() => document.getElementById('receipt-upload')?.click()}
+                >
+                  {uploading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4 mr-2" />
+                  )}
+                  {uploading ? "Processing..." : "Upload Nota"}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {ocrStatus && (
+                <div className={cn(
+                  "p-3 rounded-md text-sm border",
+                  ocrStatus.toLowerCase().includes('error') ? "bg-red-50 border-red-200 text-red-600" : "bg-blue-50 border-blue-200 text-blue-600"
+                )}>
+                  <div className="flex items-center gap-2">
+                    {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <span>{ocrStatus}</span>
+                  </div>
+                </div>
+              )}
+
+              {ocrResult && (
+                <div className="p-3 rounded-md text-xs bg-zinc-50 border border-zinc-200 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto">
+                  <div className="flex items-center gap-2 mb-1 font-semibold text-zinc-900">
+                    <FileText className="h-3 w-3" /> Hasil OCR:
+                  </div>
+                  {ocrResult}
+                </div>
+              )}
+
               <div className="flex flex-col md:flex-row gap-4 items-end">
                 <div className="flex-1 space-y-2">
                   <Label>Pilih Barang</Label>

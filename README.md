@@ -70,3 +70,10 @@ export default function ReceiptUploader() {
   );
 }
 ```
+
+```
+python -m venv venv
+venv\Scripts\activate
+pip install eventlet python-socketio paddleocr paddlepaddle
+python ocr.py
+```
