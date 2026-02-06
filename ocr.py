@@ -27,13 +27,13 @@ FRONTEND_URL = "http://localhost:3000"
 print("Sedang memuat model PaddleOCR...")
 
 # Gunakan parameter yang lebih stabil untuk nota
+# Update: Menggunakan parameter versi terbaru untuk menghindari warning deprecation
 ocr = PaddleOCR(
     lang='id',
-    use_angle_cls=False,    # Matikan jika menyebabkan spasi/karakter terpisah berlebihan
+    use_textline_orientation=False, # Pengganti use_angle_cls
     enable_mkldnn=False,
-    det_db_thresh=0.3,      # Threshold deteksi lebih rendah untuk menangkap teks tipis
-    det_db_box_thresh=0.5,
-    show_log=False
+    text_det_thresh=0.3,           # Pengganti det_db_thresh
+    text_det_box_thresh=0.5        # Pengganti det_db_box_thresh
 )
 
 print("✅ PaddleOCR Berhasil Dimuat!")
